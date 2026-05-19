@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Large model / data files
+*.pt
+*.pth
+*.pth.tar
+*.npz
+*.pkl
+*.h5
+*.hdf5
+
+# Experiment outputs (generated at runtime, not tracked)
+results/
+logs/
+wandb/
+
+# Embeddings and prototypes (large binary files inside split folders)
+**/embeddings/
+**/prototypes/
+
+# Legacy directories (superseded by downstream/)
+/dpsurv/
+/mil/
+/train.py
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

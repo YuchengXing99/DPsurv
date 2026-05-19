@@ -1,0 +1,7 @@
+{
+  "n_bins": 4,
+  "lr": 1e-4,
+  "epochs": 20,
+  "patience": 10,
+  "batch_size": 32
+}

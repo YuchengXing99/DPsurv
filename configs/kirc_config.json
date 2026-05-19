@@ -1,0 +1,9 @@
+{
+  "dataset": "KIRC",
+  "dataset_full": "TCGA_KIRC",
+  "target_col": "os_survival_days",
+  "censorship_col": "os_censorship",
+  "split_dir_template": "data/splits/TCGA_KIRC_overall_survival_k={fold}",
+  "n_folds": 5,
+  "notes": "TCGA Kidney Renal Clear Cell Carcinoma (KIRC), overall survival endpoint"
+}

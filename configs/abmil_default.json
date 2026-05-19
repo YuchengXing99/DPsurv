@@ -1,0 +1,12 @@
+{
+  "in_dim": 1024,
+  "feat_dim": 512,
+  "n_bins": 4,
+  "dropout": 0.25,
+  "attn_hidden": 256,
+  "lr": 2e-4,
+  "epochs": 20,
+  "patience": 10,
+  "batch_size": 16,
+  "loss": "nll"
+}

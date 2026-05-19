@@ -1,0 +1,21 @@
+{
+  "weight": 0.5,
+  "alpha": 0.5,
+  "xi": 0.0,
+  "rho": 0.0,
+  "lr": 1e-4,
+  "weight_decay": 2e-4,
+  "k_values": [1, 2, 3, 4],
+  "max_epochs": 50,
+  "min_epochs": 5,
+  "patience": 5,
+  "batch_size": 32,
+  "eval_batch_size": 1000,
+  "n_label_bins": 8,
+  "inner_val_frac": 0.15,
+  "warmup_ratio": 0.1,
+  "eta_min": 1e-6,
+  "gamma_scale": 0.5,
+  "prob_thresh": 0.01,
+  "kmeans_nstart": 100
+}
