@@ -52,15 +52,11 @@ The accompanying notebook [`visualization/prototypical_assignment_map_visualizat
 If you find this work useful in your research or if you use parts of this code please cite our paper:
 
 ```bibtex
-@inproceedings{xing2026dpsurv,
-  title     = {DPsurv: Dual-Prototype Evidential Fusion for Uncertainty-Aware and Interpretable Whole Slide Image Survival Prediction},
-  author    = {Xing, Yucheng and Huang, Ling and Ma, Jingying and Hong, Ruping and Qiu, Jiangdong and Liu, Pei and He, Kai and Fu, Huazhu and Feng, Mengling},
-  booktitle = {Proceedings of the 43rd International Conference on Machine Learning},
-  series    = {Proceedings of Machine Learning Research},
-  volume    = {306},
-  year      = {2026},
-  address   = {Seoul, South Korea},
-  publisher = {PMLR},
+@article{xing2025dpsurv,
+  title={DPsurv: Dual-Prototype Evidential Fusion for Uncertainty-Aware and Interpretable Whole-Slide Image Survival Prediction},
+  author={Xing, Yucheng and Huang, Ling and Ma, Jingying and Hong, Ruping and Qiu, Jiangdong and Liu, Pei and He, Kai and Fu, Huazhu and Feng, Mengling},
+  journal={arXiv preprint arXiv:2510.00053},
+  year={2025}
 }
 ```
 
