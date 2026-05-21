@@ -1,7 +1,7 @@
 # DPsurv
 
 **Dual-Prototype Evidential Fusion for Uncertainty-Aware and Interpretable Whole Slide Image Survival Prediction**, ICML 2026.
-<br><em>Yucheng Xing\*, Ling Huang†, Jingying Ma, Ruping Hong, Jiangdong Qiu, Pei Liu, Kai He, Huazhu Fu, Mengling Feng</em></br>
+<br><em>Yucheng Xing, Ling Huang†, Jingying Ma, Ruping Hong, Jiangdong Qiu, Pei Liu, Kai He, Huazhu Fu, Mengling Feng</em></br>
 
 [Paper](https://proceedings.mlr.press/v306/) | [Cite](#citation)
 
