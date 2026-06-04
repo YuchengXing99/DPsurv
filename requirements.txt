@@ -1,0 +1,40 @@
+# DPsurv pip requirements (alternative to environment.yml for non-conda users).
+#
+# Use Python 3.9. Install PyTorch first, matching your CUDA driver:
+#   pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+#   (replace cu121 with cu118 / cpu as needed)
+# then:
+#   pip install -r requirements.txt
+#
+# Version pins are mutually compatible (numpy<2 forces opencv-python<4.11,
+# and scikit-survival 0.23 forces scikit-learn<1.6).
+
+torch==2.5.1
+
+# Numerical / data
+numpy==1.26.4
+pandas==2.2.2
+scipy==1.13.1
+h5py==3.11.0
+
+# Machine learning
+scikit-learn==1.5.2
+
+# Survival analysis
+scikit-survival==0.23.0
+pycox==0.3.0
+
+# Utilities
+tqdm==4.66.4
+
+# Visualization (required for the notebooks only)
+matplotlib==3.9.4
+seaborn==0.13.2
+opencv-python==4.10.0.84
+Pillow==11.2.1
+openslide-bin==4.0.0.6
+openslide-python==1.4.2
+
+# Notebooks
+ipykernel
+jupyter

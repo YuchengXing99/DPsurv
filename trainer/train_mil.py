@@ -31,6 +31,8 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from sksurv.metrics import concordance_index_censored
+from pycox.evaluation import EvalSurv
 
 # Add repo root to path so downstream/mil_framework imports resolve
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -86,6 +88,14 @@ def _build_abmil_loaders(train_df, test_df, feat_dir, n_bins, batch_size, num_wo
     return train_loader, test_loader, train_ds.qbins
 
 
+def _assign_discrete_labels(ds, df, qbins):
+    """Discretize survival days into bin indices and attach them to the dataset."""
+    labels = pd.cut(df['dss_survival_days'].astype(float), bins=qbins,
+                    labels=False, include_lowest=True)
+    labels = labels.fillna(len(qbins) - 2).astype(np.int64)
+    ds.labels = torch.tensor(labels.to_numpy(), dtype=torch.float32)
+
+
 def _build_gmm_loaders(train_df, test_df, split_dir, embedding_fname, n_bins, batch_size, num_workers):
     import pickle
 
@@ -93,18 +103,24 @@ def _build_gmm_loaders(train_df, test_df, split_dir, embedding_fname, n_bins, ba
     with open(emb_path, 'rb') as f:
         embed_data = pickle.load(f)
 
-    train_gmm = build_df(embed_data, train_df)
-    test_gmm  = build_df(embed_data, test_df)
+    # Embeddings are stored per split: {'train': {prob,mean,cov}, 'test': {...}}
+    # build_df pairs each split's embedding rows with that split's CSV rows (same order).
+    train_gmm = build_df(embed_data['train'], train_df).reset_index(drop=True)
+    test_gmm  = build_df(embed_data['test'],  test_df).reset_index(drop=True)
 
-    # Compute bins from training data
+    # Compute bins from (uncensored) training data
     uncensored = train_gmm[train_gmm['dss_censorship'].astype(float) == 0.0]
     src = uncensored if len(uncensored) >= 2 else train_gmm
     _, qbins = pd.qcut(src['dss_survival_days'].astype(float), q=n_bins,
                        retbins=True, labels=False, duplicates='drop')
     qbins = np.unique(qbins.astype(np.float32))
+    qbins[0]  = min(qbins[0],  1e-6)
+    qbins[-1] = max(qbins[-1], 1e6)
 
-    train_ds = GMMEmbeddingDataset(train_gmm, qbins=qbins)
-    test_ds  = GMMEmbeddingDataset(test_gmm,  qbins=qbins)
+    train_ds = GMMEmbeddingDataset(train_gmm)
+    test_ds  = GMMEmbeddingDataset(test_gmm)
+    _assign_discrete_labels(train_ds, train_gmm, qbins)
+    _assign_discrete_labels(test_ds,  test_gmm,  qbins)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               collate_fn=collate_flat, num_workers=num_workers, drop_last=True)
@@ -140,14 +156,30 @@ def _train_epoch_abmil(model, loader, loss_fn, optimizer, device):
     return total_loss / max(len(loader), 1)
 
 
-def _train_epoch_gmm(model, loader, loss_fn, optimizer, device):
+def _flatten_gmm_batch(batch):
+    """Concatenate (prob, mean, cov) into a flat [B, K + 2*K*D] tensor (for LinearEmb)."""
+    return torch.cat([
+        batch['prob'],
+        batch['mean'].reshape(batch['mean'].shape[0], -1),
+        batch['cov'].reshape(batch['cov'].shape[0], -1),
+    ], dim=1)
+
+
+def _tokenize_gmm_batch(batch):
+    """Stack (prob, mean, cov) into a tokenized [B, K, 1 + 2*D] tensor (for IndivMLPEmb)."""
+    return torch.cat([batch['prob'].unsqueeze(2), batch['mean'], batch['cov']], dim=2)
+
+
+def _build_gmm_input(batch, tokenize):
+    return _tokenize_gmm_batch(batch) if tokenize else _flatten_gmm_batch(batch)
+
+
+def _train_epoch_gmm(model, loader, loss_fn, optimizer, device, tokenize=False):
     model.train()
     total_loss = 0.0
     for batch in loader:
-        x      = batch['features'].to(device) if 'features' in batch else \
-                 torch.cat([batch['prob'], batch['mean'].reshape(batch['mean'].shape[0], -1),
-                            batch['cov'].reshape(batch['cov'].shape[0], -1)], dim=1).to(device)
-        labels = batch['label'].to(device)
+        x      = _build_gmm_input(batch, tokenize).to(device)
+        labels = batch['labels'].long().to(device)
         cens   = batch['censorship'].to(device)
 
         optimizer.zero_grad()
@@ -157,6 +189,46 @@ def _train_epoch_gmm(model, loader, loss_fn, optimizer, device):
         optimizer.step()
         total_loss += loss_dict['loss'].item()
     return total_loss / max(len(loader), 1)
+
+
+def _evaluate_emb(model, loader, device, qbins, tokenize=False):
+    """Survival metrics for embedding-based models (LinearEmb / IndivMLPEmb).
+
+    Mirrors evaluate_abmil but consumes GMM batches and {'logits'} model output.
+    """
+    model.eval()
+    all_S, all_times, all_cens = [], [], []
+    with torch.no_grad():
+        for batch in loader:
+            x = _build_gmm_input(batch, tokenize).to(device)
+            logits = model(x)['logits']
+            hazards = torch.sigmoid(logits)
+            S = torch.cumprod(1 - hazards, dim=1)
+            all_S.append(S.cpu().float().numpy())
+            all_times.extend(batch['survival_time'].reshape(-1).numpy())
+            all_cens.extend(batch['censorship'].reshape(-1).numpy())
+
+    S_all    = np.concatenate(all_S, axis=0)                 # [N, n_bins]
+    times_np = np.array(all_times, dtype=np.float64)
+    cens_np  = np.array(all_cens,  dtype=np.float64)
+    events   = (1 - cens_np).astype(bool)
+
+    bin_times = 0.5 * (qbins[:-1] + qbins[1:]).astype(np.float64)
+    risk    = -S_all.sum(axis=1)
+    c_index = concordance_index_censored(events, times_np, risk, tied_tol=1e-8)[0]
+
+    surv_df = pd.DataFrame(S_all.T, index=bin_times)
+    ev      = EvalSurv(surv_df, times_np, events.astype(float), censor_surv='km')
+    t_min, t_max = max(bin_times[0], times_np.min()), min(bin_times[-1], times_np.max())
+    if t_min >= t_max:
+        t_min, t_max = bin_times[0], bin_times[-1]
+    time_grid = np.linspace(t_min, t_max, 100)
+    return {
+        'c_index':    c_index,
+        'c_index_td': ev.concordance_td('adj_antolini'),
+        'ibs':        ev.integrated_brier_score(time_grid),
+        'nbll':       ev.integrated_nbll(time_grid),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -227,30 +299,33 @@ def main():
             train_df, test_df, split_dir, args.embedding_fname,
             args.n_bins, args.batch_size, args.num_workers
         )
-        # infer flat gmm dim from first batch
+        # infer GMM shapes from first batch: prob [B, K], mean/cov [B, K, D]
         sample = next(iter(train_loader))
-        flat_dim = torch.cat([
-            sample['prob'],
-            sample['mean'].reshape(sample['mean'].shape[0], -1),
-            sample['cov'].reshape(sample['cov'].shape[0], -1),
-        ], dim=1).shape[1]
-        model_cfg = dict(in_dim=flat_dim, n_bins=args.n_bins)
+        n_proto   = sample['prob'].shape[1]
+        mean_dim  = sample['mean'].shape[2]
+        flat_dim  = n_proto + 2 * n_proto * mean_dim   # K + 2*K*D  (LinearEmb input)
+        proto_dim = 1 + 2 * mean_dim                   # per-token dim (IndivMLPEmb input)
+
+        # IndivMLPEmb consumes the tokenized [B, K, 1+2D] tensor; LinearEmb the flat one.
+        tokenize = (args.model == 'indiv_mlp')
+        if args.model == 'indiv_mlp':
+            model_cfg = dict(n_proto=n_proto, proto_dim=proto_dim, n_bins=args.n_bins)
+        else:
+            model_cfg = dict(in_dim=flat_dim, n_bins=args.n_bins)
+
         if args.loss == 'nll':
             loss_fn = NLLSurvLoss(alpha=0.0)
         else:
             loss_fn = CoxLoss()
 
         def train_epoch(m, ldr, lfn, opt, dev):
-            return _train_epoch_gmm(m, ldr, lfn, opt, dev)
+            return _train_epoch_gmm(m, ldr, lfn, opt, dev, tokenize=tokenize)
 
         def evaluate(m):
-            from downstream.abmil.losses import evaluate_abmil as _eval
-            return _eval(m, test_loader, device, qbins)
+            return _evaluate_emb(m, test_loader, device, qbins, tokenize=tokenize)
 
     # ---- Build model --------------------------------------------------------
-    if args.input_type == 'gmm' and args.model in ('linear_emb', 'indiv_mlp'):
-        # linear_emb needs flat dim; indiv_mlp needs tokenized — use linear_emb only
-        model_cfg = dict(in_dim=flat_dim, n_bins=args.n_bins)
+    # model_cfg is fully prepared above per (input_type, model).
     model = create_downstream_model(args.model, model_cfg)
     model.to(device)
 

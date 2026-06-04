@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import torch
 from pathlib import Path
+from typing import Optional
 from torch.utils.data import Dataset
 
 
@@ -56,7 +57,7 @@ class PatchBagDataset(Dataset):
         label_df: pd.DataFrame,
         feat_dir: Path,
         n_bins: int = 4,
-        qbins: np.ndarray | None = None,
+        qbins: Optional[np.ndarray] = None,
         max_patches: int = 0,
     ):
         self.feat_dir    = Path(feat_dir)

@@ -16,6 +16,7 @@ import argparse
 import gc
 import json
 import random
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -26,6 +27,10 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+
+# Make repo-root packages (downstream/, mil_framework/) importable when this
+# file is run directly as a script (e.g. via scripts/run_dpsurv.sh).
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from downstream.dpsurv.models import ENNreg_init_cosine, mixture_ENNreg_new, mixture_input_dim_from_mean_dim
 from downstream.dpsurv.losses import Mixture_Evidential_nll_Loss, evaluate_nll_batch_survival

@@ -14,30 +14,106 @@
 
 ## Installation
 
+With conda (recommended):
+
 ```shell
 conda env create -f environment.yml
 conda activate dpsurv
 ```
 
-> **PyTorch / CUDA**: the default `environment.yml` targets CUDA 12.1. Replace `cu121` with `cu118` (or `cpu`) in both the index URL and the torch package name if your driver requires a different version.
+Or with pip into a Python 3.9 environment:
+
+```shell
+# install PyTorch first, matching your CUDA driver (see note below)
+pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+```
+
+> **PyTorch / CUDA**: the defaults target CUDA 12.1. Replace `cu121` with `cu118` (or `cpu`) in the index URL / torch package if your driver requires a different version.
+
+### Verify the install
+
+Run the end-to-end smoke test. It generates tiny *synthetic* GMM embeddings and
+runs one fold of the full nested-CV pipeline in seconds (no real data needed):
+
+```shell
+python tests/smoke_test.py            # add --device cuda to test the GPU path
+```
+
+It should print `[smoke_test] PASSED` and a `summary.json` with C-index / IBS / NBLL.
+
+## Data and labels
+
+- **Endpoint**: experiments use **disease-specific survival (DSS)** — columns
+  `dss_survival_days` and `dss_censorship` (censorship: `1` = censored, `0` = event).
+  The split folders keep the historical name `..._overall_survival_k=<fold>`, but
+  training reads the `dss_*` columns.
+- **Splits**: 5-fold splits for BLCA, BRCA, KIRC, LUAD, UCEC are provided under
+  `data/splits/`. Each fold has `train.csv` and `test.csv`.
+- **Embeddings** are *not* committed (they are large). Each fold expects a
+  pickled file at `data/splits/<DATASET>_overall_survival_k=<fold>/embeddings/<name>.pkl`
+  with the layout:
+  ```
+  {'train': {'prob': [N,K], 'mean': [N,K,D], 'cov': [N,K,D]},
+   'test':  {'prob': [N,K], 'mean': [N,K,D], 'cov': [N,K,D]}}
+  ```
+  where rows are ordered to match the rows of `train.csv` / `test.csv`.
 
 ## Running DPsurv
 
-### Step 1. Extract PANTHER GMM embeddings
+The full pipeline is: **WSIs → patch features → prototypes → PANTHER GMM
+embeddings → DPsurv training**. Steps 0–1 below build on
+[PANTHER](https://github.com/mahmoodlab/PANTHER); if you already have the
+tokenized embeddings, skip straight to Step 2.
+
+### Step 0a (upstream). Patch features
+
+Tile each WSI and extract patch features with a foundation model (we use
+**UNI2**, `vit_large`, 20× magnification, 256 px patches → feature dim **1536**),
+saving one `<slide_id>.h5` per slide (dataset key `features`).
+See [CLAM](https://github.com/mahmoodlab/CLAM) / [Trident](https://github.com/mahmoodlab/TRIDENT).
+This is the only step external to this repo.
+
+### Step 0b. Cluster prototypes (per fold)
+
+Cluster the fold's **training** patch features into **K = 16** prototypes:
+
+```shell
+python feature_extraction/cluster_prototypes.py \
+    --split_dir data/splits/TCGA_KIRC_overall_survival_k=0 \
+    --feat_dir  /path/to/tcga_kirc/feats_h5 \
+    --in_dim 1536 --n_proto 16 --mode kmeans --n_proto_patches 100000
+```
+
+This writes `data/splits/.../prototypes/prototypes_c16_kmeans_num_1.0e+05.pkl`
+(key `prototypes`, shape `[1, K, 1536]`). Use `--mode faiss` for GPU K-means
+(needs `faiss-gpu`).
+
+### Step 1. Extract PANTHER GMM embeddings (per fold)
 
 ```shell
 python feature_extraction/extract_gmm.py \
-    --feat_dir /path/to/feats_h5 \
-    --out_path data/splits/TCGA_KIRC_overall_survival_k=0/embeddings/panther.pkl \
-    --proto_path /path/to/kirc_prototypes.pkl \
-    --in_dim 1536 --n_proto 16 --device cuda
+    --split_dir data/splits/TCGA_KIRC_overall_survival_k=0 \
+    --feat_dir  /path/to/tcga_kirc/feats_h5 \
+    --proto_path data/splits/TCGA_KIRC_overall_survival_k=0/prototypes/prototypes_c16_kmeans_num_1.0e+05.pkl \
+    --in_dim 1536 --n_proto 16 --em_iter 1 --tau 1.0 --ot_eps 1.0 \
+    --device cuda
 ```
+
+This writes the tokenized embedding `.pkl` (in the layout above) into
+`data/splits/TCGA_KIRC_overall_survival_k=0/embeddings/`. The default output
+name matches the trainer's `--embedding_fname`; repeat for each fold (k=0..4).
 
 ### Step 2. Train DPsurv
 
 ```shell
 bash scripts/run_dpsurv.sh KIRC
 ```
+
+This runs nested cross-validation over all 5 folds (inner K-selection then
+full-train retraining) and writes per-fold metrics and a `summary.json` to
+`results/<DATASET>/`. See `python trainer/train_dpsurv.py --help` for all options
+(e.g. `--embedding_fname` if you used a custom embedding filename).
 
 ## Visualization
 
