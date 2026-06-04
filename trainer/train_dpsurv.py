@@ -17,6 +17,7 @@ import gc
 import json
 import random
 import sys
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -34,6 +35,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from downstream.dpsurv.models import ENNreg_init_cosine, mixture_ENNreg_new, mixture_input_dim_from_mean_dim
 from downstream.dpsurv.losses import Mixture_Evidential_nll_Loss, evaluate_nll_batch_survival
+
+# torch.optim.lr_scheduler.SequentialLR internally steps its child schedulers with an
+# epoch argument, which raises a spurious deprecation warning even though we call
+# scheduler.step() correctly. Silence just that message (LR schedule is unchanged).
+warnings.filterwarnings(
+    "ignore",
+    message=r"The epoch parameter in `scheduler.step\(\)` was not necessary.*",
+    category=UserWarning,
+)
 from downstream.dpsurv.data import GMMEmbeddingDataset, build_df, collate_flat
 
 
