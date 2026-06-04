@@ -18,12 +18,6 @@ conda activate dpsurv
 
 > CUDA 12.1 by default. For another driver, swap `cu121` → `cu118`/`cpu` in `environment.yml` (or install `torch==2.5.1` from the matching PyTorch index).
 
-Check the install with a synthetic end-to-end run (a few seconds, no data needed):
-
-```shell
-python tests/smoke_test.py            # prints [smoke_test] PASSED
-```
-
 ## Reproduce
 
 5-fold splits for BLCA, BRCA, KIRC, LUAD, UCEC are in `data/splits/`; the
