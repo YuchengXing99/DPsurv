@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run DPsurv nested cross-validation on a TCGA cancer dataset.
+# Run DPsurv cross-validation on a TCGA cancer dataset.
 #
 # Usage:
 #   bash scripts/run_dpsurv.sh [CANCER]

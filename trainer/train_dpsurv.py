@@ -1,8 +1,8 @@
 """
-DPsurv — Nested cross-validation training and evaluation.
+DPsurv — Cross-validation training and evaluation.
 
-Runs per-fold nested model selection (inner-loop K search) followed by
-full outer-train retraining, and reports C-index / NBLL / IBS / C-index_td
+Runs per-fold model selection (inner-loop K search) followed by
+full-train retraining, and reports C-index / NBLL / IBS / C-index_td
 for each dataset and fold.
 
 Usage example:
@@ -65,8 +65,8 @@ def set_seed(seed: int) -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "DPsurv: nested cross-validation training. "
-            "Performs inner K selection then full outer-train retraining."
+            "DPsurv: cross-validation training. "
+            "Performs inner K selection then full-train retraining."
         )
     )
     parser.add_argument(

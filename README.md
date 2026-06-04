@@ -46,7 +46,7 @@ python feature_extraction/extract_gmm.py \
     --in_dim 1536 --n_proto 16 --device cuda
 ```
 
-**3. Train + evaluate** (nested CV over all 5 folds):
+**3. Train + evaluate** (CV over all 5 folds):
 
 ```shell
 bash scripts/run_dpsurv.sh KIRC
