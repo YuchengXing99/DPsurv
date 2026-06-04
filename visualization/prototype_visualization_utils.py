@@ -59,7 +59,7 @@ def get_mixture_plot_threshold(mixtures, threshold=0.01,
     import numpy as np, pandas as pd, matplotlib as mpl, matplotlib.pyplot as plt, seaborn as sns
     from matplotlib import font_manager as fm
 
-    # ---- 原始全集 label 与颜色映射（不随过滤改变） ----
+    # ---- full label set and its color map (unaffected by filtering) ----
     K = len(mixtures)
     labels_all = [f'c{i}' for i in range(K)]
     colors = [
@@ -74,13 +74,13 @@ def get_mixture_plot_threshold(mixtures, threshold=0.01,
     ]
     cmap_full = {lab: colors[i % len(colors)] for i, lab in enumerate(labels_all)}
 
-    # ---- 数据框 & 过滤（不改映射）----
+    # ---- dataframe & filtering (mapping unchanged) ----
     df = pd.DataFrame({'cluster': labels_all, 'value': np.asarray(mixtures, dtype=float)})
     df = df[df['value'] > threshold]
-    # 维持按原编号排序
+    # keep the original index order
     df = df.sort_values(key=lambda s: s.str[1:].astype(int), by='cluster')
 
-    # ---- 画图 ----
+    # ---- plotting ----
     fig = plt.figure(figsize=figsize, dpi=300)
     prop = fm.FontProperties(fname="./Arial.ttf")
     mpl.rcParams['axes.linewidth'] = 1.0
@@ -94,17 +94,17 @@ def get_mixture_plot_threshold(mixtures, threshold=0.01,
         legend=False, width=bar_width
     )
 
-    # 纵轴标签（LaTeX）
+    # y-axis label (LaTeX)
     ax.set_ylabel(r'Proportion $\pi_c$', fontproperties=prop, fontsize=10, labelpad=2)
 
-    # 横轴可选隐藏
+    # optionally hide x-axis ticks
     if hide_xticks:
         ax.set_xticks([])
         ax.set_xlabel('')
     else:
         ax.set_xlabel('Cluster', fontproperties=prop, fontsize=10)
 
-    # y 轴范围
+    # y-axis range
     if ymax is None:
         ymax = float(df['value'].max()) * 1.15 if len(df) else 0.1
     ax.set_ylim(0, ymax)
@@ -267,14 +267,14 @@ def visualize_single_class_highlight(
         vis_level=None,
         patch_size=(256, 256),
         mode="tint",          # "tint" | "outline" | "dim_others"
-        alpha=0.35,           # 仅对 "tint" 生效
-        outline_thickness=2,  # 仅对 "outline" 生效
-        dim_alpha=0.4,        # 仅对 "dim_others" 生效
+        alpha=0.35,           # only used for "tint"
+        outline_thickness=2,  # only used for "outline"
+        dim_alpha=0.4,        # only used for "dim_others"
         verbose=True,
     ):
     assert vis_level is not None, "Please pass a valid vis_level."
 
-    # 缩放
+    # scaling
     downsample = float(wsi.level_downsamples[vis_level])
     scale = 1.0 / downsample
 
@@ -283,7 +283,7 @@ def visualize_single_class_highlight(
     pw, ph = np.ceil(np.array(patch_size) * scale).astype(int)
     pw, ph = int(pw), int(ph)
 
-    # 读取底图（整张原图保留）
+    # read base image (keep the full original)
     base = wsi.read_region((0, 0), vis_level, wsi.level_dimensions[vis_level]).convert("RGB")
     base = np.array(base)
     H, W = base.shape[:2]
@@ -293,7 +293,7 @@ def visualize_single_class_highlight(
     color = tuple(map(int, label2color_dict.get(target_class, (255, 0, 0))))
 
     if mode == "tint":
-        # 逐块混合：只对 target_class 的 patch 做 (1-alpha)*base + alpha*color
+        # per-patch blend: (1-alpha)*base + alpha*color only on target_class patches
         for idx in np.nonzero(labels == target_class)[0]:
             x, y = int(coords_scaled[idx, 0]), int(coords_scaled[idx, 1])
             x2, y2 = min(x + pw, W), min(y + ph, H)
@@ -315,7 +315,7 @@ def visualize_single_class_highlight(
             cv2.rectangle(out, (x, y), (x2-1, y2-1), color, thickness=outline_thickness)
 
     elif mode == "dim_others":
-        # 整体先变暗，然后把 target patch 恢复原亮度
+        # darken everything, then restore brightness on target patches
         dimmed = cv2.addWeighted(base, 1.0 - dim_alpha, np.zeros_like(base), dim_alpha, 0)
         out = dimmed
         for idx in np.nonzero(labels == target_class)[0]:
@@ -333,22 +333,22 @@ def visualize_single_class_highlight(
 def visualize_thumbnail(
         wsi,
         vis_level=None,
-        max_size=(2048, 2048),  # 控制缩略图最大尺寸
+        max_size=(2048, 2048),  # max thumbnail size
         verbose=True,
     ):
 
     if vis_level is None:
-        # 自动选择合适的层
+        # auto-select an appropriate level
         vis_level = wsi.get_best_level_for_downsample(32)  
 
-    # 读取原图在指定层的区域
+    # read the region at the chosen level
     img = wsi.read_region((0, 0), vis_level, wsi.level_dimensions[vis_level]).convert("RGB")
 
     if verbose:
         print(f"vis_level: {vis_level}")
-        print(f"原图尺寸: {wsi.level_dimensions[0]}, 缩略图尺寸: {img.size}")
+        print(f"original size: {wsi.level_dimensions[0]}, thumbnail size: {img.size}")
 
-    # 缩放成指定最大尺寸
+    # resize to the given max size
     img.thumbnail(max_size, Image.Resampling.LANCZOS)
 
     return img
@@ -366,20 +366,20 @@ def visualize_risk_heatmap(
     pi_components=None,
     cmap_name='RdBu_r',
     high_is='red',
-    alpha=0.55,                    # 稍微大一点更明显
+    alpha=0.55,                    # slightly larger is more visible
     pi_thresh=0.01,
     stretch='percentile', p_low=5, p_high=95,
-    spot_sigma_frac=0.6,           # 稍大一点更连续
+    spot_sigma_frac=0.6,           # slightly larger is smoother
     ksize_mult=6,
-    coords_are_centers=False,      # 关键：声明 coords 的语义
-    debug=True                     # 打印覆盖率等信息
+    coords_are_centers=False,      # important: declares the semantics of coords
+    debug=True                     # print coverage info, etc.
 ):
-    # 1) 读底图（目标显示层级）
+    # 1) read base image (target display level)
     base = wsi.read_region((0, 0), vis_level, wsi.level_dimensions[vis_level]).convert("RGB")
     base = np.asarray(base)
     H, W = base.shape[0], base.shape[1]
 
-    # 2) 缩放 coords（源层级 -> 目标层级）
+    # 2) scale coords (source level -> target level)
     ds_src = float(wsi.level_downsamples[coords_level])
     ds_tgt = float(wsi.level_downsamples[vis_level])
     scale  = ds_src / ds_tgt
@@ -387,7 +387,7 @@ def visualize_risk_heatmap(
     patch_vis  = np.maximum(1, np.rint(np.array(patch_size) * scale).astype(int))  # (w,h)
     pw, ph = int(patch_vis[0]), int(patch_vis[1])
 
-    # 3) μ→v∈[0,1]（高μ=红）
+    # 3) mu -> v in [0,1] (high mu = red)
     mu = np.asarray(mu_components, float).reshape(-1)
     if pi_components is None:
         pi = np.ones_like(mu)
@@ -409,11 +409,11 @@ def visualize_risk_heatmap(
 
     v_of_label = 1.0 - mu_norm if high_is == 'red' else mu_norm
 
-    # 4) 脉冲图（中心点 or 左上角）
+    # 4) impulse map (centers or top-left corners)
     risk_imp = np.zeros((H, W), np.float32)
     w_imp    = np.zeros((H, W), np.float32)
 
-    # 如果 coords 给的是左上角，需要加半个 patch 才到中心；如果本来就是中心，就不要再加
+    # if coords are top-left corners, add half a patch to reach the center; if already centers, do not add
     cx_add = 0 if coords_are_centers else pw // 2
     cy_add = 0 if coords_are_centers else ph // 2
 
@@ -434,7 +434,7 @@ def visualize_risk_heatmap(
     if debug:
         print(f"[DEBUG] points inside canvas: {n_in} / {len(coords_vis)} at vis_level={vis_level}")
 
-    # 5) 高斯扩散
+    # 5) Gaussian diffusion
     sigma = max(pw, ph) * float(spot_sigma_frac)
     ksize = int(max(3, np.ceil(ksize_mult * sigma)))
     if ksize % 2 == 0: 
@@ -448,13 +448,13 @@ def visualize_risk_heatmap(
         covered = (w_smooth > 1e-8).sum()
         print(f"[DEBUG] w_smooth.max()={wmax:.6f}, covered_pixels={covered}/{H*W}")
 
-    # 若无覆盖，直接返回原图，避免“看起来没变化”的困惑
+    # if there is no coverage, return the original image to avoid confusion
     if wmax <= 1e-12 or covered == 0:
         if debug:
             print("[DEBUG] No coverage after scaling. Check coords_level/vis_level and coords_are_centers.")
         return Image.fromarray(base)
 
-    # 填洞避免除零
+    # fill holes to avoid division by zero
     mask = w_smooth > 1e-8
     if not mask.all():
         fill = cv2.blur(risk_smooth, (9, 9))
@@ -463,14 +463,14 @@ def visualize_risk_heatmap(
 
     risk_field = np.clip(risk_smooth / w_smooth, 0.0, 1.0)
 
-    # 6) 上色 + 仅在覆盖区域叠加
+    # 6) colorize + overlay only on covered regions
     cmap = plt.get_cmap(cmap_name)
 
     risk_for_color = risk_field.copy()
-    risk_for_color[mask == 0] = 0.5  # 中性
+    risk_for_color[mask == 0] = 0.5  # neutral
     risk_rgb = (cmap(risk_for_color)[:, :, :3] * 255).astype(np.uint8)
 
-    # 局部透明度（羽化）
+    # local opacity (feathering)
     mask_soft = (w_smooth / (wmax + 1e-8))
     mask_soft = cv2.GaussianBlur(mask_soft, (9, 9), 2.0)
     mask_soft = np.clip(mask_soft, 0.0, 1.0)
@@ -492,7 +492,7 @@ def visualize_risk_heatmap(
         mu_components=None,
         pi_components = None,
     ):
-    # === new: 用 GRFN 的 mu 来决定每个簇的颜色：mu 小更红，mu 大更蓝 ===
+    # === new: color each cluster by GRFN mu: small mu redder, large mu bluer ===
     #label2color_dict = mu_to_label2color(mu_components, cmap_name='coolwarm_r')
     label2color_dict = mu_to_label2color(mu_components, pi_components)
 
@@ -547,22 +547,22 @@ def visualize_risk_heatmap(
 
 def mu_to_label2color(mu_components,
                       pi_components,
-                      cmap_name='coolwarm_r',  # 反向色带：0=红, 1=蓝 → 高mu会更蓝
+                      cmap_name='coolwarm_r',  # reversed colormap: 0=red, 1=blue -> high mu is bluer
                       pi_thresh=0.01,
                       other_color=(200, 200, 200),
                       tie_tol=1e-12):
     """
-    返回: {label_index: (R, G, B)} (0-255整数)
+    Returns: {label_index: (R, G, B)} as 0-255 ints
 
-    规则：
-    - pi < pi_thresh 的组件统一用 other_color。
-    - 其余组件按 mu 从高到低排序并映射到 [0,1]。
-      使用 'coolwarm_r' 时，v=1 为蓝、v=0 为红 → 高mu更蓝，低mu更红。
+    Rules:
+    - components with pi < pi_thresh all use other_color.
+    - the rest are sorted by mu (high to low) and mapped to [0,1].
+      with 'coolwarm_r', v=1 is blue and v=0 is red -> high mu bluer, low mu redder.
     """
     mu = np.asarray(mu_components, dtype=float).reshape(-1)
     pi = np.asarray(pi_components, dtype=float).reshape(-1)
     if mu.shape != pi.shape:
-        raise ValueError(f"mu 和 pi 形状不一致: {mu.shape} vs {pi.shape}")
+        raise ValueError(f"mu and pi shapes differ: {mu.shape} vs {pi.shape}")
 
     label2color = {}
     keep = np.isfinite(mu) & np.isfinite(pi) & (pi >= pi_thresh)
@@ -579,7 +579,7 @@ def mu_to_label2color(mu_components,
     if m == 1:
         v = np.array([0.5], dtype=float)
     else:
-        order = np.argsort(-mu_keep)   # 降序
+        order = np.argsort(-mu_keep)   # descending
         v_sorted = mu_keep[order]
         ranks = np.empty(m, dtype=float)
         i = 0
@@ -590,7 +590,7 @@ def mu_to_label2color(mu_components,
             avg_rank = (i + j) / 2.0
             ranks[order[i:j+1]] = avg_rank
             i = j + 1
-        v = 1.0 - ranks / (m - 1)      # 高mu→1（在 coolwarm_r 中对应蓝）
+        v = 1.0 - ranks / (m - 1)      # high mu -> 1 (blue in coolwarm_r)
 
     cmap = plt.get_cmap(cmap_name)
     for k, vv in zip(idx_keep, v):
@@ -600,21 +600,21 @@ def mu_to_label2color(mu_components,
 '''
 def mu_to_label2color(mu_components,
                       pi_components,
-                      cmap_name='RdBu_r',     # 蓝↔红
+                      cmap_name='RdBu_r',     # blue <-> red
                       pi_thresh=0.01,
                       other_color=(220, 220, 220),
                       tie_tol=1e-12,
-                      high_is='red',          # 'red' 或 'blue'
+                      high_is='red',          # 'red' or 'blue'
                       stretch='percentile',   # 'none' / 'minmax' / 'percentile'
                       p_low=5, p_high=95):
     """
-    若你还需要“离散上色”的版本，可保留此函数。
-    这里也做了对比度拉伸（percentile），让色带“拉满”更亮。
+    Keep this function if you also need the discrete-coloring version.
+    Also applies percentile contrast stretching so the colormap spans its full range.
     """
     mu = np.asarray(mu_components, float).reshape(-1)
     pi = np.asarray(pi_components, float).reshape(-1)
     if mu.shape != pi.shape:
-        raise ValueError(f"mu 和 pi 形状不一致: {mu.shape} vs {pi.shape}")
+        raise ValueError(f"mu and pi shapes differ: {mu.shape} vs {pi.shape}")
 
     label2color = {}
     keep = np.isfinite(mu) & np.isfinite(pi) & (pi >= pi_thresh)
@@ -656,7 +656,7 @@ def mu_to_label2color(mu_components,
             avg_rank = (i + j) / 2.0
             ranks[order[i:j+1]] = avg_rank
             i = j + 1
-        # RdBu_r 中 v 越小越红 → 高风险=红
+        # in RdBu_r smaller v is redder -> high risk = red
         v = ranks / (m - 1) if high_is == 'red' else 1.0 - ranks / (m - 1)
 
     cmap = plt.get_cmap(cmap_name)
@@ -678,16 +678,16 @@ def visualize_single_class_highlight(
         vis_level=None,
         patch_size=(256, 256),
         mode="tint",            # "tint" | "outline" | "dim_others"
-        alpha=0.35,             # 仅对 "tint" 生效
-        outline_thickness=2,    # 仅对 "outline" 生效
-        dim_alpha=0.4,          # 仅对 "dim_others" 生效
-        feather_sigma=2.0,      # <<< 新增：边缘平滑(高斯羽化)的σ，0=关闭
-        outline_color=None,     # None=用 label2color_dict[target_class]
+        alpha=0.35,             # only used for "tint"
+        outline_thickness=2,    # only used for "outline"
+        dim_alpha=0.4,          # only used for "dim_others"
+        feather_sigma=2.0,      # <<< new: sigma for edge feathering (Gaussian); 0 = off
+        outline_color=None,     # None = use label2color_dict[target_class]
         verbose=True,
     ):
     assert vis_level is not None, "Please pass a valid vis_level."
 
-    # === 缩放 ===
+    # === scaling ===
     downsample = float(wsi.level_downsamples[vis_level])
     scale = 1.0 / downsample
 
@@ -696,18 +696,18 @@ def visualize_single_class_highlight(
     pw, ph = np.ceil(np.array(patch_size) * scale).astype(int)
     pw, ph = int(max(pw,1)), int(max(ph,1))
 
-    # === 读取底图（整张原图保留）===
+    # === read base image (keep the full original) ===
     base = wsi.read_region((0, 0), vis_level, wsi.level_dimensions[vis_level]).convert("RGB")
     base = np.array(base)
     H, W = base.shape[:2]
     out = base.copy()
 
-    # === 颜色 ===
+    # === color ===
     color = tuple(map(int, label2color_dict.get(target_class, (255, 0, 0))))
     if outline_color is None:
         outline_color = color
 
-    # === 构建 target 的整图 mask (0/255) ===
+    # === build the full-image mask for target (0/255) ===
     mask = np.zeros((H, W), dtype=np.uint8)
     idxs = np.nonzero(labels == target_class)[0]
     for idx in idxs:
@@ -721,7 +721,7 @@ def visualize_single_class_highlight(
         nz = int(mask.sum() // 255)
         print(f"[feather] target patches: {len(idxs)}, mask pixels: {nz}")
 
-    # === 软掩码：高斯羽化 (0..1) ===
+    # === soft mask: Gaussian feathering (0..1) ===
     if feather_sigma and feather_sigma > 0:
         mask_soft = cv2.GaussianBlur(mask, (0, 0), feather_sigma).astype(np.float32) / 255.0
     else:
@@ -730,19 +730,19 @@ def visualize_single_class_highlight(
     mask3 = np.dstack([mask_soft]*3)  # (H,W,3), 0..1
 
     if mode == "tint":
-        # 只在 target 区域进行逐像素混合：out = base*(1 - a*m) + color*(a*m)
+        # per-pixel blend only in target region: out = base*(1 - a*m) + color*(a*m)
         color_img = np.empty_like(base); color_img[:] = color
         a = float(alpha)
         w = (a * mask3).astype(np.float32)
         out = (base.astype(np.float32) * (1.0 - w) + color_img.astype(np.float32) * w).clip(0,255).astype(np.uint8)
 
     elif mode == "outline":
-        # 用形态学梯度从二值mask取边缘，再画线（边缘本身已被羽化柔和）
+        # get edges from the binary mask via morphological gradient, then draw them
         edges = cv2.morphologyEx((mask > 0).astype(np.uint8), cv2.MORPH_GRADIENT,
                                  cv2.getStructuringElement(cv2.MORPH_RECT, (3,3)))
         ys, xs = np.where(edges > 0)
         out[ys, xs] = outline_color
-        # 也可用 cv2.rectangle 逐patch画框（硬边），保留你的老逻辑：
+        # alternatively, draw per-patch boxes with cv2.rectangle (hard edges)
         # for idx in idxs:
         #     x, y = int(coords_scaled[idx, 0]), int(coords_scaled[idx, 1])
         #     x2, y2 = min(x + pw, W), min(y + ph, H)
@@ -750,7 +750,7 @@ def visualize_single_class_highlight(
         #     cv2.rectangle(out, (x, y), (x2-1, y2-1), outline_color, thickness=outline_thickness)
 
     elif mode == "dim_others":
-        # 先得到暗化版本，然后用软掩码把目标区域平滑替换回原图
+        # darken first, then use the soft mask to smoothly restore the target region
         dimmed = cv2.addWeighted(base, 1.0 - dim_alpha, np.zeros_like(base), dim_alpha, 0)
         out = (dimmed.astype(np.float32) * (1.0 - mask3) + base.astype(np.float32) * mask3).clip(0,255).astype(np.uint8)
 
