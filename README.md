@@ -64,6 +64,16 @@ DPsurv overlays prototype-level survival estimates back onto the WSI to show whi
 
 See [`visualization/prototypical_assignment_map_visualization_LUAD.ipynb`](visualization/prototypical_assignment_map_visualization_LUAD.ipynb) for a worked example.
 
+## Repository layout
+
+```
+feature_extraction/   prototype clustering + PANTHER GMM embedding extraction
+downstream/dpsurv/    the DPsurv model, loss, and dataset (main method)
+trainer/              entry points: train_dpsurv.py (DPsurv) · train_mil.py (baselines)
+mil_framework/        shared infrastructure for the MIL baselines
+data/splits/          5-fold train/test CSVs · scripts/ run scripts · examples/ demo notebook
+```
+
 ## Citation
 
 ```bibtex

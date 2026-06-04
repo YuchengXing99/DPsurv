@@ -4,7 +4,6 @@ DPsurv model components.
 ENNreg_new   — single evidence neural network regressor for one GMM component.
 mixture_ENNreg_new — ensemble of K per-prototype ENNreg_new experts (the DPsurv model).
 ENNreg_init_cosine — cosine-distance KMeans initialisation for prototype parameters.
-ENNreg_init        — Euclidean KMeans initialisation (alternative).
 """
 
 import numpy as np
@@ -127,56 +126,6 @@ def ENNreg_init_cosine(prob, X, y, K, nstart=100, c=1.0, eps=1e-8, prob_thresh=0
         'gam':   gam.to(device),
         'W':     W.to(device),
     }
-
-
-def ENNreg_init(prob, X, y, K, nstart=100, c=1):
-    """
-    Initialise prototype parameters using Euclidean weighted KMeans.
-
-    Alternative to ENNreg_init_cosine; kept for reference.
-    """
-    X_np   = X.cpu().numpy()
-    prob_np = prob.cpu().numpy()
-
-    clus = KMeans(n_clusters=K, max_iter=5000, n_init=nstart, random_state=0).fit(
-        X_np, sample_weight=prob_np
-    )
-
-    input_dim = mixture_input_dim_from_mean_dim(X.shape[1])
-    Beta  = torch.zeros(K, input_dim, dtype=torch.float64)
-    alpha = torch.zeros(K, dtype=torch.float64)
-    sig   = torch.ones(K, dtype=torch.float64)
-    W     = torch.tensor(clus.cluster_centers_, dtype=torch.float64)
-    gam   = torch.ones(K, dtype=torch.float64)
-
-    X_t    = X.to(dtype=torch.float64)
-    prob_t = prob.to(dtype=torch.float64)
-    y_t    = y.to(dtype=torch.float64)
-
-    for k in range(K):
-        mask = torch.eq(torch.tensor(clus.labels_), k)
-        ii = torch.nonzero(mask, as_tuple=True)[0]
-        if ii.numel() > 0:
-            w_k = prob_t[ii]
-            alpha[k] = torch.sum(w_k * y_t[ii]) / (torch.sum(w_k) + 1e-8)
-            if ii.numel() > 1:
-                dist2 = torch.sum((X_t[ii] - W[k]) ** 2, dim=1)
-                inertia_k = torch.sum(w_k * dist2)
-                gam[k] = 1.0 / torch.sqrt(1e-3 + (inertia_k / (torch.sum(w_k) + 1e-8)) / 2)
-                sig[k] = torch.sqrt(
-                    torch.sum(w_k * (y_t[ii] - alpha[k]) ** 2) / (torch.sum(w_k) + 1e-8)
-                )
-
-    gam *= c
-
-    cnt      = np.bincount(clus.labels_, minlength=K)
-    sum_prob = np.bincount(clus.labels_, weights=prob_np, minlength=K)
-    mean_prob = sum_prob / np.maximum(cnt, 1)
-    eta = 2 * torch.sqrt(
-        torch.clamp(torch.from_numpy(mean_prob), min=1e-6)
-    ).to(dtype=torch.float64)
-
-    return {'alpha': alpha, 'Beta': Beta, 'sig': sig, 'eta': eta, 'gam': gam, 'W': W}
 
 
 class ENNreg_new(nn.Module):

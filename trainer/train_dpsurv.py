@@ -288,7 +288,7 @@ def infer_input_dim(train_df: pd.DataFrame) -> int:
     cov  = np.asarray(train_df["cov"].iloc[0])
     if mean.shape != cov.shape:
         raise ValueError(f"Mean/Cov shape mismatch: {mean.shape} vs {cov.shape}")
-    return 1 + 2 * int(mean.shape[1])
+    return mixture_input_dim_from_mean_dim(mean.shape[1])
 
 
 def init_prototypes(
@@ -317,22 +317,8 @@ def init_prototypes(
 
 
 def build_optimizer(model: torch.nn.Module, lr: float, weight_decay: float) -> torch.optim.Optimizer:
-    beta_params, w_params, other_params = [], [], []
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if "beta" in name:
-            beta_params.append(param)
-        elif "w" in name:
-            w_params.append(param)
-        else:
-            other_params.append(param)
-    return torch.optim.AdamW(
-        [{"params": beta_params,  "weight_decay": weight_decay},
-         {"params": w_params,     "weight_decay": weight_decay},
-         {"params": other_params, "weight_decay": weight_decay}],
-        lr=lr,
-    )
+    params = [p for p in model.parameters() if p.requires_grad]
+    return torch.optim.AdamW(params, lr=lr, weight_decay=weight_decay)
 
 
 def build_scheduler(
