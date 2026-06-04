@@ -33,6 +33,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sksurv.metrics import concordance_index_censored
 from pycox.evaluation import EvalSurv
+from sklearn.model_selection import train_test_split
 
 # Add repo root to path so downstream/mil_framework imports resolve
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -77,15 +78,37 @@ def _load_split_csv(split_dir: Path) -> tuple:
     return train_df, test_df
 
 
-def _build_abmil_loaders(train_df, test_df, feat_dir, n_bins, batch_size, num_workers):
-    train_ds = PatchBagDataset(train_df, feat_dir=feat_dir, n_bins=n_bins)
-    test_ds  = PatchBagDataset(test_df,  feat_dir=feat_dir, n_bins=n_bins, bins=train_ds.qbins)
+def _split_train_val(df, val_fraction=0.15, seed=SEED):
+    """Split a training frame into (inner-train, validation), keeping events in both.
+
+    Selection is by event-presence only (a validity requirement), never by metric,
+    so model selection / early stopping can use the validation set instead of test.
+    """
+    events = (1.0 - df['dss_censorship'].astype(float)).astype(int)
+    strat = events if (events.nunique() > 1 and events.value_counts().min() >= 2) else None
+    tr, va = None, None
+    for offset in range(32):
+        tr, va = train_test_split(df, test_size=val_fraction, random_state=seed + offset,
+                                  shuffle=True, stratify=strat)
+        has = lambda d: ((1.0 - d['dss_censorship'].astype(float)) > 0.5).any()
+        if has(tr) and has(va):
+            break
+    return tr.reset_index(drop=True), va.reset_index(drop=True)
+
+
+def _build_abmil_loaders(train_df, test_df, feat_dir, n_bins, batch_size, num_workers, val_fraction):
+    tr_df, val_df = _split_train_val(train_df, val_fraction)
+    train_ds = PatchBagDataset(tr_df,   feat_dir=feat_dir, n_bins=n_bins)
+    val_ds   = PatchBagDataset(val_df,  feat_dir=feat_dir, n_bins=n_bins, bins=train_ds.qbins)
+    test_ds  = PatchBagDataset(test_df, feat_dir=feat_dir, n_bins=n_bins, bins=train_ds.qbins)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               collate_fn=collate_bags, num_workers=num_workers, drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,
+                              collate_fn=collate_bags, num_workers=num_workers)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False,
                               collate_fn=collate_bags, num_workers=num_workers)
-    return train_loader, test_loader, train_ds.qbins
+    return train_loader, val_loader, test_loader, train_ds.qbins
 
 
 def _assign_discrete_labels(ds, df, qbins):
@@ -96,7 +119,7 @@ def _assign_discrete_labels(ds, df, qbins):
     ds.labels = torch.tensor(labels.to_numpy(), dtype=torch.float32)
 
 
-def _build_gmm_loaders(train_df, test_df, split_dir, embedding_fname, n_bins, batch_size, num_workers):
+def _build_gmm_loaders(train_df, test_df, split_dir, embedding_fname, n_bins, batch_size, num_workers, val_fraction):
     import pickle
 
     emb_path = split_dir / "embeddings" / embedding_fname
@@ -107,26 +130,32 @@ def _build_gmm_loaders(train_df, test_df, split_dir, embedding_fname, n_bins, ba
     # build_df pairs each split's embedding rows with that split's CSV rows (same order).
     train_gmm = build_df(embed_data['train'], train_df).reset_index(drop=True)
     test_gmm  = build_df(embed_data['test'],  test_df).reset_index(drop=True)
+    # Hold out a validation set from train (embeddings + labels stay row-aligned).
+    tr_gmm, val_gmm = _split_train_val(train_gmm, val_fraction)
 
-    # Compute bins from (uncensored) training data
-    uncensored = train_gmm[train_gmm['dss_censorship'].astype(float) == 0.0]
-    src = uncensored if len(uncensored) >= 2 else train_gmm
+    # Compute bins from (uncensored) inner-training data only
+    uncensored = tr_gmm[tr_gmm['dss_censorship'].astype(float) == 0.0]
+    src = uncensored if len(uncensored) >= 2 else tr_gmm
     _, qbins = pd.qcut(src['dss_survival_days'].astype(float), q=n_bins,
                        retbins=True, labels=False, duplicates='drop')
     qbins = np.unique(qbins.astype(np.float32))
     qbins[0]  = min(qbins[0],  1e-6)
     qbins[-1] = max(qbins[-1], 1e6)
 
-    train_ds = GMMEmbeddingDataset(train_gmm)
-    test_ds  = GMMEmbeddingDataset(test_gmm)
-    _assign_discrete_labels(train_ds, train_gmm, qbins)
-    _assign_discrete_labels(test_ds,  test_gmm,  qbins)
+    train_ds, val_ds, test_ds = (GMMEmbeddingDataset(tr_gmm),
+                                 GMMEmbeddingDataset(val_gmm),
+                                 GMMEmbeddingDataset(test_gmm))
+    _assign_discrete_labels(train_ds, tr_gmm,  qbins)
+    _assign_discrete_labels(val_ds,   val_gmm, qbins)
+    _assign_discrete_labels(test_ds,  test_gmm, qbins)
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                               collate_fn=collate_flat, num_workers=num_workers, drop_last=True)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,
+                              collate_fn=collate_flat, num_workers=num_workers)
     test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False,
                               collate_fn=collate_flat, num_workers=num_workers)
-    return train_loader, test_loader, qbins
+    return train_loader, val_loader, test_loader, qbins
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +282,8 @@ def parse_args():
     p.add_argument('--in_dim',         type=int,   default=1024, help='Patch feature dim (raw pathway)')
     p.add_argument('--feat_dim',       type=int,   default=512)
     p.add_argument('--n_bins',         type=int,   default=4)
+    p.add_argument('--val_fraction',   type=float, default=0.15,
+                   help='Fraction of train held out for early stopping (test is never used for selection)')
     p.add_argument('--loss',           type=str,   default='nll', choices=['nll', 'cox'])
     p.add_argument('--lr',             type=float, default=1e-4)
     p.add_argument('--epochs',         type=int,   default=20)
@@ -282,8 +313,9 @@ def main():
     if args.input_type == 'raw':
         if args.feat_dir is None:
             raise ValueError("--feat_dir is required for --input_type raw")
-        train_loader, test_loader, qbins = _build_abmil_loaders(
-            train_df, test_df, args.feat_dir, args.n_bins, args.batch_size, args.num_workers
+        train_loader, val_loader, test_loader, qbins = _build_abmil_loaders(
+            train_df, test_df, args.feat_dir, args.n_bins, args.batch_size, args.num_workers,
+            args.val_fraction
         )
         model_cfg = dict(in_dim=args.in_dim, feat_dim=args.feat_dim, n_bins=args.n_bins)
         loss_fn   = ABMILSurvNLLLoss(alpha=0.0)
@@ -291,13 +323,13 @@ def main():
         def train_epoch(m, ldr, lfn, opt, dev):
             return _train_epoch_abmil(m, ldr, lfn, opt, dev)
 
-        def evaluate(m):
-            return evaluate_abmil(m, test_loader, device, qbins)
+        def evaluate(m, loader):
+            return evaluate_abmil(m, loader, device, qbins)
 
     else:  # gmm
-        train_loader, test_loader, qbins = _build_gmm_loaders(
+        train_loader, val_loader, test_loader, qbins = _build_gmm_loaders(
             train_df, test_df, split_dir, args.embedding_fname,
-            args.n_bins, args.batch_size, args.num_workers
+            args.n_bins, args.batch_size, args.num_workers, args.val_fraction
         )
         # infer GMM shapes from first batch: prob [B, K], mean/cov [B, K, D]
         sample = next(iter(train_loader))
@@ -321,8 +353,8 @@ def main():
         def train_epoch(m, ldr, lfn, opt, dev):
             return _train_epoch_gmm(m, ldr, lfn, opt, dev, tokenize=tokenize)
 
-        def evaluate(m):
-            return _evaluate_emb(m, test_loader, device, qbins, tokenize=tokenize)
+        def evaluate(m, loader):
+            return _evaluate_emb(m, loader, device, qbins, tokenize=tokenize)
 
     # ---- Build model --------------------------------------------------------
     # model_cfg is fully prepared above per (input_type, model).
@@ -338,14 +370,14 @@ def main():
 
     for epoch in range(1, args.epochs + 1):
         tr_loss = train_epoch(model, train_loader, loss_fn, optimizer, device)
-        metrics = evaluate(model)
+        val_metrics = evaluate(model, val_loader)   # model selection on validation only
         print(f"  Epoch {epoch:3d} | loss={tr_loss:.4f} | "
-              f"C-index={metrics['c_index']:.4f} | IBS={metrics['ibs']:.4f}")
-        if early_stop(metrics['c_index'], epoch):
+              f"val C-index={val_metrics['c_index']:.4f} | val IBS={val_metrics['ibs']:.4f}")
+        if early_stop(val_metrics['c_index'], epoch):
             print(f"  Early stopping at epoch {epoch}.")
             break
 
-    metrics = evaluate(model)
+    metrics = evaluate(model, test_loader)          # test touched once, for reporting only
     print(f"\n[Results] C-index={metrics['c_index']:.4f} | "
           f"C-index_td={metrics['c_index_td']:.4f} | "
           f"IBS={metrics['ibs']:.4f} | NBLL={metrics['nbll']:.4f}")
