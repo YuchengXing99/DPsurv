@@ -77,16 +77,11 @@ data/splits/          5-fold train/test CSVs · scripts/ run scripts · examples
 ## Citation
 
 ```bibtex
-@inproceedings{pmlr-v306-xing26d,
+@inproceedings{xing2026dpsurv,
   title={{DP}surv: Dual-Prototype Evidential Fusion for Uncertainty-Aware and Interpretable Whole Slide Image Survival Prediction},
   author={Xing, Yucheng and Huang, Ling and Ma, Jingying and Hong, Ruping and Qiu, Jiangdong and Liu, Pei and He, Kai and Fu, Huazhu and Feng, Mengling},
   booktitle={Proceedings of the 43rd International Conference on Machine Learning},
-  pages={140060--140084},
-  year={2026},
-  volume={306},
-  series={Proceedings of Machine Learning Research},
-  publisher={PMLR},
-  url={https://proceedings.mlr.press/v306/xing26d.html}
+  year={2026}
 }
 ```
 
